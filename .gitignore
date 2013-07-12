@@ -1,0 +1,10 @@
+.idea
+target
+*.iml
+.settings
+.classpath
+.project
+out
+.class
+.history
+scalastyle-config.xml
