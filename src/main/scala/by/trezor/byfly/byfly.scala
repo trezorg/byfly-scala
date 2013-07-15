@@ -11,6 +11,7 @@ import org.jsoup.nodes.Document
 import org.streum.configrity._
 import org.fusesource.jansi.Ansi._
 
+case class ByflyException(message: String) extends Exception(message)
 
 object ByflyOutput {
 
@@ -92,8 +93,10 @@ object Byfly {
 
 class Byfly(login: String, password: String) {
 
+  import Byfly._
+
   val byflyHttpOptions: List[HttpOptions.HttpOption] =
-    List(HttpOptions.connTimeout(Byfly.ConnectionTimeout), HttpOptions.readTimeout(Byfly.ConnectionTimeout))
+    List(HttpOptions.connTimeout(ConnectionTimeout), HttpOptions.readTimeout(ConnectionTimeout))
 
   def cookiesToMap(st: String): Map[String, String] = {
     st.split("; ").map(_.split("=", 2)).foldLeft(Map[String, String]())((m, s) => m + (
@@ -104,52 +107,45 @@ class Byfly(login: String, password: String) {
   }
 
   def getLoginParams: List[(String, String)] =
-    List((Byfly.LoginFieldName, login), (Byfly.PasswordFieldName, password))
+    List((LoginFieldName, login), (PasswordFieldName, password))
 
   lazy val sessionHeaders: List[(String, String)] =
-    List(("Cookie", Byfly.SessionCookieName + "=" + getSessionCookie)) ::: Byfly.Headers
+    List(("Cookie", SessionCookieName + "=" + getSessionCookie)) ::: Headers
 
   def getSessionCookie: String = {
-    val data = Http.post(Byfly.UrlLogin).headers(Byfly.Headers).
+    val data = Http.post(UrlLogin).headers(Headers).
       options(byflyHttpOptions).
       params(getLoginParams).
-      asCodeHeaders
+      asHeadersAndParse(Http.readString(_, PageCodePage))
+    val html = data._3
+    if (html contains ErrorText) {
+      throw new ByflyException(ErrorText)
+    }
     data._2.get("Set-cookie") match {
       case Some(list: List[String]) => {
         for (
           map <- list.map(cookiesToMap);
           (name, value) <- map
-          if name == Byfly.SessionCookieName
+          if name == SessionCookieName
         ) yield value}.mkString
       case _ => ""
     }
   }
 
-  def getBalancePage: String = Http(Byfly.UrlAccount).headers(sessionHeaders).
-    options(byflyHttpOptions).charset(Byfly.PageCodePage).asString
+  def getBalancePage: String = Http(UrlAccount).headers(sessionHeaders).
+    options(byflyHttpOptions).charset(PageCodePage).asString
 
-  def getData: Option[(String, String)] = {
-    val html = getBalancePage
-    if (html contains Byfly.ErrorText) {
-      Byfly.LOG.log(Level.SEVERE, Byfly.ErrorText)
-      None
-    } else {
-      Some(ByflyParser.parsePage(html))
-    }
-  }
+  def getData: (String, String) = ByflyParser.parsePage(getBalancePage)
 
   def apply() {
     try {
-      getData match {
-        case Some((balance, tariff)) => {
-          ByflyOutput.prn("Баланс: ", Some(Color.GREEN))(balance)
-          ByflyOutput.prn("Тариф: ", Some(Color.GREEN))(tariff)
-        }
-        case _ =>
-      }
+      val (balance, tariff) = getData
+      ByflyOutput.prn("Баланс: ", Some(Color.GREEN))(balance)
+      ByflyOutput.prn("Тариф: ", Some(Color.GREEN))(tariff)
     } catch {
-      case scalaj.http.HttpException(403, message, _, _) => Byfly.LOG.log(Level.SEVERE, "%s: %s" format (Byfly.MainErrorText, message))
-      case ex: Exception => Byfly.LOG.log(Level.SEVERE, ex.getMessage)
+      case scalaj.http.HttpException(403, message, _, _) => LOG.log(Level.SEVERE, "%s: %s" format (MainErrorText, message))
+      case ex: ByflyException => LOG.log(Level.SEVERE, ex.getMessage)
+      case ex: Exception => LOG.log(Level.SEVERE, "%s: %s" format (MainErrorText, ex.getStackTraceString))
     }
   }
 }
@@ -186,6 +182,8 @@ object ByflyConfig {
 
 object Main {
 
+  import Byfly._
+
   def main(args: Array[String]) {
 
     val conf = new ByflyOptions(args)
@@ -206,7 +204,7 @@ object Main {
         new Byfly(login, password)()
       }
       case _ => {
-        Byfly.LOG.info(Byfly.ConfigErrorText)
+        LOG.info(ConfigErrorText)
         conf.printHelp()
         sys.exit(1)
       }
