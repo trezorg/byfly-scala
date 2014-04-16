@@ -11,6 +11,13 @@ Installation
     $ sbt run
     $ sbt assembly
 
+It is also possible to make a self-executable Linux script by
+
+    $ sbt deploy
+
+It will create the executable file "byfly" in the project directory
+
+
 Usage
 -------
 
@@ -33,3 +40,8 @@ or
 
     $sbt
     >run --help
+
+
+or
+
+    $./byfly --help
